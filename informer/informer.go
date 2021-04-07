@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/nickytd/alert-namespace-silencer/silencer"
 	v1_ "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -51,10 +52,20 @@ func (s *NamespaceInformer) RunNamespaceInformer(label string, silenceMatcherAtt
 	})
 
 	go s.runAdd(label, silenceMatcherAttribute)
-	go s.runDelete(label, silenceMatcherAttribute)
+	go s.runDelete(silenceMatcherAttribute)
 
 	informerFactory.Start(s.StopCh)
 	informerFactory.WaitForCacheSync(s.StopCh)
+
+	if ns, err := informer.Lister().List(labels.Everything()); err == nil {
+		klog.ErrorS(err, "error listing namespaces")
+	} else {
+		for _, n := range ns {
+			klog.V(4).InfoS("lister", "namespace", n.Name)
+		}
+	}
+
+	silencer.CleanSilences()
 
 }
 
@@ -67,8 +78,9 @@ func (s *NamespaceInformer) runAdd(label string, silenceMatcherAttribute string)
 		uid := fmt.Sprintf("%s", n.GetUID())
 		klog.V(2).InfoS(
 			"processing namespace",
-			"Id", uid,
-			silenceMatcherAttribute, n.Name,
+			"name", n.Name,
+			"id", uid,
+			"silence matcher name", silenceMatcherAttribute,
 		)
 
 		//since the label is enable-alerts we remove silencer when present
@@ -84,7 +96,7 @@ func (s *NamespaceInformer) runAdd(label string, silenceMatcherAttribute string)
 	}
 }
 
-func (s *NamespaceInformer) runDelete(label string, silenceMatcherAttribute string) {
+func (s *NamespaceInformer) runDelete(silenceMatcherAttribute string) {
 	s.sync.Lock()
 	defer s.sync.Unlock()
 
@@ -93,9 +105,10 @@ func (s *NamespaceInformer) runDelete(label string, silenceMatcherAttribute stri
 		n := item.(*v1_.Namespace)
 		uid := fmt.Sprintf("%s", n.GetUID())
 		klog.InfoS(
-			"deleting namespace",
-			"Id", uid,
-			silenceMatcherAttribute, n.Name,
+			"deleting silence for namespace",
+			"name", n.Name,
+			"id", uid,
+			"silence matcher name", silenceMatcherAttribute,
 		)
 
 		if silencer.RemoveSilencer(silenceMatcherAttribute, n.GetName()) {

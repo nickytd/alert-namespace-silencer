@@ -1,6 +1,7 @@
 package silencer
 
 import (
+	"fmt"
 	"github.com/go-openapi/strfmt"
 	"github.com/prometheus/alertmanager/api/v2/client"
 	"github.com/prometheus/alertmanager/api/v2/client/silence"
@@ -45,16 +46,23 @@ func AddSilencer(name string, value string) bool {
 func RemoveSilencer(name string, value string) bool {
 	var m *labels.Matcher
 	var err error
-	var res *silence.GetSilencesOK
-	var dres *silence.DeleteSilenceOK
 
-	if m, err = labels.NewMatcher(labels.MatchEqual, name, value); err != nil {
+	v := fmt.Sprintf("%s/%s", ".*", value)
+	if m, err = labels.NewMatcher(labels.MatchEqual, name, v); err != nil {
 		klog.ErrorS(err, "cannot create matcher")
 		return false
 	}
 
 	param := silence.NewGetSilencesParams().
 		WithFilter([]string{m.String()})
+
+	return deleteSilences(param)
+}
+
+func deleteSilences(param *silence.GetSilencesParams) bool {
+	var err error
+	var res *silence.GetSilencesOK
+	var deleted bool
 
 	if res, err = manager.Silence.GetSilences(param); err != nil {
 		klog.ErrorS(err, "cannot get silences")
@@ -63,45 +71,51 @@ func RemoveSilencer(name string, value string) bool {
 
 	for _, s := range res.GetPayload() {
 		uid := strfmt.UUID(*s.ID)
-		klog.V(4).InfoS(
-			"silence",
-			"id", uid,
-			"status", *s.Status.State,
-		)
 
 		if models.SilenceStatusStateExpired == *s.Status.State {
+			klog.V(4).InfoS("skip expired silence", "id", uid)
+			continue
+		}
+
+		if *s.CreatedBy != createdby {
+			klog.V(4).InfoS(
+				"skip unmanaged silence",
+				"id", uid,
+				"createdBy", *s.CreatedBy,
+			)
 			continue
 		}
 
 		deleteParam := silence.NewDeleteSilenceParams().WithSilenceID(uid)
-		if dres, err = manager.Silence.DeleteSilence(deleteParam); err != nil {
+		if _, err = manager.Silence.DeleteSilence(deleteParam); err != nil {
 			klog.ErrorS(
 				err, "error deleting silence",
 				"id", uid.String(),
 			)
+			deleted = false
 		} else {
 			klog.V(2).InfoS(
-				"deleting silence", "result",
-				dres.Error(),
+				"deleting silence",
+				"id", uid.String(),
 			)
+			deleted = true
 		}
 	}
-
-	return true
+	return deleted
 }
 
 func createSilencer(namespace string, value string) *models.PostableSilence {
 
 	now := time.Now().UTC()
 	starts := strfmt.DateTime(now)
-	ends := strfmt.DateTime(now.AddDate(1, 0, 0))
+	ends := strfmt.DateTime(now.AddDate(0, 1, 0))
 
-	regex := false
-
+	regex := true
+	v := fmt.Sprintf("%s/%s", ".*", value)
 	matcher := models.Matcher{
 		IsRegex: &regex,
 		Name:    &namespace,
-		Value:   &value,
+		Value:   &v,
 	}
 
 	matchers := models.Matchers{
@@ -121,4 +135,10 @@ func createSilencer(namespace string, value string) *models.PostableSilence {
 	}
 
 	return &postableSilence
+}
+
+func CleanSilences() {
+	if deleteSilences(silence.NewGetSilencesParams()) {
+		klog.InfoS("silence clean up finished successfully")
+	}
 }

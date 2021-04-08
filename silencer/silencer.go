@@ -25,12 +25,12 @@ func InitAlertManager(url url.URL) {
 		WithSchemes([]string{url.Scheme}).
 		WithBasePath("/api/v2")
 	manager = client.NewHTTPClientWithConfig(nil, config)
+	cleanSilences()
 }
 
 func AddSilencer(name string, value string) bool {
 
 	s := createSilencer(name, value)
-
 	param := silence.NewPostSilencesParams().WithSilence(s)
 	ok, err := manager.Silence.PostSilences(param)
 	if err != nil {
@@ -62,13 +62,13 @@ func RemoveSilencer(name string, value string) bool {
 func deleteSilences(param *silence.GetSilencesParams) bool {
 	var err error
 	var res *silence.GetSilencesOK
-	var deleted bool
 
 	if res, err = manager.Silence.GetSilences(param); err != nil {
 		klog.ErrorS(err, "cannot get silences")
 		return false
 	}
 
+	deleted := true
 	for _, s := range res.GetPayload() {
 		uid := strfmt.UUID(*s.ID)
 
@@ -137,7 +137,7 @@ func createSilencer(namespace string, value string) *models.PostableSilence {
 	return &postableSilence
 }
 
-func CleanSilences() {
+func cleanSilences() {
 	if deleteSilences(silence.NewGetSilencesParams()) {
 		klog.InfoS("silence clean up finished successfully")
 	}

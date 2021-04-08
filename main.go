@@ -38,7 +38,7 @@ func main() {
 	flag.StringVar(
 		&label,
 		"enable-label",
-		"enable-alerts=true",
+		"enable-alerts",
 		"namespace label to creating alert silences")
 
 	flag.StringVar(

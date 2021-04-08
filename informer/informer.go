@@ -12,7 +12,6 @@ import (
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog/v2"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -21,7 +20,6 @@ type NamespaceInformer struct {
 	AddQueue    *workqueue.Type
 	DeleteQueue *workqueue.Type
 	StopCh      <-chan struct{}
-	sync        sync.Mutex
 }
 
 func (s *NamespaceInformer) RunNamespaceInformer(label string, silenceMatcherAttribute string) {
@@ -57,7 +55,7 @@ func (s *NamespaceInformer) RunNamespaceInformer(label string, silenceMatcherAtt
 	informerFactory.Start(s.StopCh)
 	informerFactory.WaitForCacheSync(s.StopCh)
 
-	if ns, err := informer.Lister().List(labels.Everything()); err == nil {
+	if ns, err := informer.Lister().List(labels.Everything()); err != nil {
 		klog.ErrorS(err, "error listing namespaces")
 	} else {
 		for _, n := range ns {
@@ -65,19 +63,15 @@ func (s *NamespaceInformer) RunNamespaceInformer(label string, silenceMatcherAtt
 		}
 	}
 
-	silencer.CleanSilences()
-
 }
 
 func (s *NamespaceInformer) runAdd(label string, silenceMatcherAttribute string) {
-	s.sync.Lock()
-	defer s.sync.Unlock()
 	for {
 		item, _ := s.AddQueue.Get()
 		n := item.(*v1_.Namespace)
 		uid := fmt.Sprintf("%s", n.GetUID())
 		klog.V(2).InfoS(
-			"processing namespace",
+			"add queue",
 			"name", n.Name,
 			"id", uid,
 			"silence matcher name", silenceMatcherAttribute,
@@ -97,15 +91,13 @@ func (s *NamespaceInformer) runAdd(label string, silenceMatcherAttribute string)
 }
 
 func (s *NamespaceInformer) runDelete(silenceMatcherAttribute string) {
-	s.sync.Lock()
-	defer s.sync.Unlock()
 
 	for {
 		item, _ := s.DeleteQueue.Get()
 		n := item.(*v1_.Namespace)
 		uid := fmt.Sprintf("%s", n.GetUID())
-		klog.InfoS(
-			"deleting silence for namespace",
+		klog.V(2).InfoS(
+			"delete queue",
 			"name", n.Name,
 			"id", uid,
 			"silence matcher name", silenceMatcherAttribute,

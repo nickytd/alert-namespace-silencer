@@ -1,9 +1,9 @@
 ### build go executable
-FROM golang:1.15
+FROM golang:1.19
 
 COPY . /go/src/alert-namespace-silencer
 WORKDIR /go/src/alert-namespace-silencer
-RUN GO111MODULE=on CGO_ENABLED=0 GOOS=linux go build -o alert-namespace-silencer
+RUN go build -o alert-namespace-silencer
 
 ### final image
 FROM alpine:latest
